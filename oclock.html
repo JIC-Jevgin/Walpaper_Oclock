@@ -1,0 +1,544 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="color-scheme" content="light dark">
+<title>Clock Clock - Final Fix</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --transition-color: 0.9s cubic-bezier(0.4, 0, 0.2, 1);
+    --transition-hands: 0.72s cubic-bezier(0.34, 1.28, 0.64, 1);
+    --gap: 6px;
+    --cell: 72px;
+    --hand-w: 3.5px;
+    --hand-h: 42%;
+    --radius: 50%;
+  }
+
+  /* Тёмная тема (по умолчанию) */
+  body:not(.light) {
+    --bg: #0a0a0f;
+    --surface: rgba(255,255,255,0.04);
+    --hand: #f0ece4;
+    --dot: rgba(240,236,228,0.85);
+    --center: #f0ece4;
+    --shadow: rgba(240,236,228,0.08);
+    --panel-bg: rgba(10,10,15,0.85);
+    --text: rgba(240,236,228,0.9);
+    --text-dim: rgba(240,236,228,0.35);
+    --accent: #c8b89a;
+    --accent2: #7c6e5a;
+    --border: rgba(240,236,228,0.07);
+  }
+
+  /* Светлая тема */
+  body.light {
+    --bg: #f2efe9;
+    --surface: rgba(0,0,0,0.04);
+    --hand: #1a1814;
+    --dot: rgba(26,24,20,0.75);
+    --center: #1a1814;
+    --shadow: rgba(0,0,0,0.07);
+    --panel-bg: rgba(242,239,233,0.92);
+    --text: rgba(26,24,20,0.9);
+    --text-dim: rgba(26,24,20,0.35);
+    --accent: #8b7355;
+    --accent2: #bfb09c;
+    --border: rgba(26,24,20,0.08);
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: 'DM Mono', monospace;
+    overflow: hidden;
+    transition: background var(--transition-color), color var(--transition-color);
+    position: relative;
+    cursor: none;
+  }
+
+  body.cursor-visible { cursor: default; }
+
+  #bg-video {
+    position: fixed; inset: 0;
+    width: 100%; height: 100%;
+    object-fit: cover;
+    z-index: 0;
+    display: none;
+    opacity: 0.45;
+  }
+
+  #bg-overlay {
+    position: fixed; inset: 0;
+    z-index: 1;
+    background: linear-gradient(135deg, rgba(0,0,0,0.35) 0%, transparent 60%, rgba(0,0,0,0.25) 100%);
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.5s;
+  }
+  #bg-overlay.active { opacity: 1; }
+
+  #wall {
+    display: flex;
+    align-items: center;
+    position: relative;
+    z-index: 10;
+    transform: scale(var(--scale, 0.82));
+    transition: transform 0.4s ease;
+  }
+
+  .group-wrap { display: flex; align-items: center; gap: 20px; }
+  .group { display: flex; gap: 8px; }
+
+  /* Полностью переписанный контейнер секунд, который больше не обрезается */
+  #sec-wrapper {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    width: 360px; /* Жёстко зафиксированная ширина под цифры */
+    margin-left: 20px;
+    opacity: 1;
+    flex-shrink: 0; /* Не даём блоку сжиматься */
+    overflow: visible; /* Отключаем обрезание теней и кругов */
+    transition: width var(--transition-hands), margin-left var(--transition-hands), opacity 0.4s ease;
+  }
+
+  /* Запрещаем сплющиваться элементам внутри секунд при скрытии */
+  #sec-wrapper > * {
+    flex-shrink: 0;
+  }
+
+  #sec-wrapper.hidden { 
+    width: 0; 
+    margin-left: 0; 
+    opacity: 0; 
+    pointer-events: none;
+  }
+
+  .digit {
+    display: grid;
+    grid-template-columns: repeat(2, var(--cell));
+    grid-template-rows: repeat(3, var(--cell));
+    gap: var(--gap);
+  }
+
+  .clock {
+    width: var(--cell); height: var(--cell); background: var(--surface);
+    border-radius: var(--radius); position: relative;
+    box-shadow: 0 0 0 1px var(--border), 0 8px 24px var(--shadow);
+    transition: background var(--transition-color), box-shadow var(--transition-color);
+    backdrop-filter: blur(2px);
+  }
+
+  .hand {
+    position: absolute; bottom: 50%; left: 50%;
+    width: var(--hand-w); height: var(--hand-h); background: var(--hand);
+    transform-origin: bottom center; translate: -50% 0;
+    transition: transform var(--transition-hands), opacity 0.5s ease, background var(--transition-color);
+    border-radius: 9px 9px 2px 2px;
+  }
+
+  .clock::after {
+    content: ''; position: absolute; inset: 50%;
+    width: 5px; height: 5px; background: var(--center);
+    border-radius: 50%; translate: -50% -50%; z-index: 3;
+    transition: background var(--transition-color);
+  }
+
+  .sep {
+    display: flex; flex-direction: column; justify-content: center;
+    align-items: center; gap: 18px; width: 16px; height: calc(3 * var(--cell) + 2 * var(--gap));
+  }
+
+  @keyframes blink {
+    0%,45%  { opacity: 1; transform: scale(1); }
+    50%,95% { opacity: 0.15; transform: scale(0.6); }
+    100%    { opacity: 1; transform: scale(1); }
+  }
+
+  .dot {
+    width: 7px; height: 7px; background: var(--dot); border-radius: 50%;
+    animation: blink 1s infinite ease-in-out; transition: background var(--transition-color);
+  }
+  .dot:nth-child(2) { animation-delay: 0.1s; }
+
+  /* Управление */
+  #controls {
+    position: fixed; bottom: 28px; left: 50%; translate: -50% 0;
+    z-index: 200; display: flex; align-items: center; gap: 10px;
+    opacity: 0; transition: opacity 0.4s ease; pointer-events: none;
+  }
+  body.cursor-visible #controls { opacity: 1; pointer-events: auto; }
+
+  .ctrl-btn {
+    width: 40px; height: 40px; border-radius: 50%; border: 1px solid var(--border);
+    background: var(--panel-bg); color: var(--text); font-size: 16px; cursor: pointer;
+    display: flex; align-items: center; justify-content: center; backdrop-filter: blur(12px);
+    transition: background 0.2s, border-color 0.2s, transform 0.15s, color var(--transition-color);
+  }
+  .ctrl-btn:hover { background: var(--surface); border-color: var(--accent); transform: scale(1.1); }
+  .ctrl-btn.active { border-color: var(--accent); background: rgba(200,184,154,0.12); }
+
+  /* Настройки */
+  #panel {
+    position: fixed; bottom: 82px; left: 50%; translate: -50% 0;
+    z-index: 300; background: var(--panel-bg); border: 1px solid var(--border);
+    border-radius: 20px; padding: 24px; width: 320px; display: none;
+    flex-direction: column; gap: 18px; backdrop-filter: blur(24px);
+    box-shadow: 0 20px 60px rgba(0,0,0,0.4);
+    transition: background var(--transition-color), border-color var(--transition-color);
+    opacity: 0; transform: translateY(12px) scale(0.97);
+  }
+  #panel.open { display: flex; animation: panelIn 0.28s cubic-bezier(0.34,1.2,0.64,1) forwards; }
+  @keyframes panelIn { to { opacity: 1; transform: translateY(0) scale(1); } }
+
+  .panel-title {
+    font-size: 11px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--accent);
+    padding-bottom: 4px; border-bottom: 1px solid var(--border);
+    transition: color var(--transition-color), border-color var(--transition-color);
+  }
+
+  .row { display: flex; flex-direction: column; gap: 7px; }
+  .row label { font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-dim); transition: color var(--transition-color); }
+
+  .row select, .row input[type="range"] {
+    width: 100%; padding: 7px 10px; border-radius: 8px; border: 1px solid var(--border);
+    background: var(--surface); color: var(--text); font-family: 'DM Mono', monospace;
+    font-size: 12px; outline: none; appearance: none; cursor: pointer;
+    transition: border-color 0.2s, background var(--transition-color), color var(--transition-color);
+  }
+  .row select:hover, .row input[type="range"]:hover { border-color: var(--accent); }
+
+  .toggle-row { display: flex; align-items: center; justify-content: space-between; }
+  .toggle-row span { font-size: 12px; color: var(--text); transition: color var(--transition-color); }
+
+  .toggle {
+    width: 40px; height: 22px; border-radius: 11px; background: var(--surface);
+    border: 1px solid var(--border); cursor: pointer; position: relative;
+    transition: background var(--transition-color), border-color var(--transition-color);
+  }
+  .toggle.on { background: var(--accent2); border-color: var(--accent); }
+  .toggle::after {
+    content: ''; position: absolute; top: 3px; left: 3px; width: 14px; height: 14px;
+    border-radius: 50%; background: var(--text); transition: left 0.2s, background var(--transition-color);
+  }
+  .toggle.on::after { left: 21px; }
+
+  .slider-row { display: flex; align-items: center; gap: 10px; }
+  .slider-row input { flex: 1; }
+  .slider-row span { font-size: 11px; color: var(--text-dim); min-width: 28px; text-align: right; transition: color var(--transition-color);}
+
+  .file-upload { position: relative; overflow: hidden; }
+  .file-upload input[type="file"] { position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; height: 100%; }
+  .file-upload-label {
+    display: flex; align-items: center; justify-content: center; gap: 8px;
+    padding: 9px 14px; border-radius: 9px; border: 1px dashed var(--border);
+    color: var(--text-dim); font-size: 11px; letter-spacing: 0.08em;
+    transition: border-color 0.2s, color 0.2s; cursor: pointer;
+  }
+  .file-upload:hover .file-upload-label { border-color: var(--accent); color: var(--accent); }
+
+  .btn-h {
+    padding: 8px; border-radius: 8px; border: 1px solid var(--border);
+    background: transparent; color: var(--text); font-family: 'DM Mono', monospace;
+    font-size: 11px; cursor: pointer; text-align: center; transition: all 0.2s; letter-spacing: 0.08em;
+  }
+  .btn-h:hover { border-color: var(--accent); }
+  .clear-btn { color: var(--text-dim); }
+  .clear-btn:hover { border-color: #c05050; color: #c05050; }
+</style>
+</head>
+<body>
+
+<video id="bg-video" autoplay loop muted playsinline></video>
+<div id="bg-overlay"></div>
+<div id="wall"></div>
+
+<div id="controls">
+  <button class="ctrl-btn" id="btn-sec" title="Секунды">⏱</button>
+  <button class="ctrl-btn" id="btn-theme" title="Тема">☽</button>
+  <button class="ctrl-btn" id="btn-settings" title="Настройки">⚙</button>
+</div>
+
+<div id="panel">
+  <div class="panel-title">Настройки</div>
+
+  <div class="row">
+    <label>Тема</label>
+    <select id="theme-sel">
+      <option value="auto_time">Авто — по времени (19:00 - 07:00)</option>
+      <option value="auto_sys">Авто — по системе</option>
+      <option value="dark">Тёмная</option>
+      <option value="light">Светлая</option>
+    </select>
+  </div>
+
+  <div class="row">
+    <label>Часовой пояс: <span id="tz-display" style="color:var(--accent);"></span></label>
+    <button class="btn-h" id="geo-btn">🌍 Определить по гео</button>
+  </div>
+
+  <div class="row">
+    <label>Размер</label>
+    <div class="slider-row">
+      <input type="range" id="scale-sl" min="0.3" max="1.8" step="0.05" value="0.82">
+      <span id="scale-val">0.82</span>
+    </div>
+  </div>
+
+  <div class="row">
+    <div class="toggle-row">
+      <span>Секунды</span>
+      <div class="toggle on" id="toggle-sec"></div>
+    </div>
+  </div>
+
+  <div class="row">
+    <label>Фон — фото или видео</label>
+    <div class="file-upload">
+      <input type="file" id="bg-file" accept="image/*,video/mp4,video/webm">
+      <div class="file-upload-label">📁 &nbsp;Выбрать файл</div>
+    </div>
+    <button class="btn-h clear-btn" id="clear-bg">Очистить фон</button>
+  </div>
+</div>
+
+<script>
+const P = {
+  0: [[180,90],[180,270],[0,180],[0,180],[0,90],[0,270]],
+  1: [[225,225],[180,180],[225,225],[0,180],[225,225],[0,0]],
+  2: [[180,90],[180,270],[180,90],[0,270],[0,90],[270,270]],
+  3: [[90,90],[180,270],[90,90],[0,180],[90,90],[0,270]],
+  4: [[180,180],[180,180],[0,90],[0,180],[225,225],[0,0]],
+  5: [[180,90],[270,270],[0,90],[180,270],[90,90],[0,270]],
+  6: [[180,90],[270,270],[0,180],[180,270],[0,90],[0,270]],
+  7: [[90,90],[180,270],[225,225],[0,180],[225,225],[0,0]],
+  8: [[180,90],[180,270],[90,90],[270,270],[0,90],[0,270]],
+  9: [[180,90],[180,270],[0,90],[0,180],[90,90],[0,270]],
+};
+
+// Версия ключей V6 для 100% сброса старых багнутых настроек
+const S = {
+  scale:   parseFloat(localStorage.getItem('cc_v6_scale')  || '0.82'),
+  theme:   localStorage.getItem('cc_v6_theme')  || 'auto_sys',
+  tz:      localStorage.getItem('cc_v6_tz')     || 'auto',
+  seconds: localStorage.getItem('cc_v6_sec')    !== 'false',
+};
+
+const wall = document.getElementById('wall');
+const allClocks = []; 
+
+function makeDigit() {
+  const el = document.createElement('div'); el.className = 'digit';
+  const clocks = [];
+  for (let i = 0; i < 6; i++) {
+    const c = document.createElement('div'); c.className = 'clock';
+    const h1 = document.createElement('div'); h1.className = 'hand';
+    const h2 = document.createElement('div'); h2.className = 'hand';
+    c.append(h1, h2); el.appendChild(c);
+    clocks.push([{ el: h1, angle: 225 }, { el: h2, angle: 225 }]);
+  }
+  return { el, clocks };
+}
+
+function makeSep() {
+  const el = document.createElement('div'); el.className = 'sep';
+  el.innerHTML = '<div class="dot"></div><div class="dot"></div>';
+  return el;
+}
+
+function appendDigit(parent) {
+  const { el, clocks } = makeDigit();
+  allClocks.push(clocks); parent.appendChild(el);
+}
+
+// Сборка часов
+const hmGroup = document.createElement('div'); hmGroup.className = 'group-wrap';
+const hGroup = document.createElement('div'); hGroup.className = 'group';
+appendDigit(hGroup); appendDigit(hGroup);
+const mGroup = document.createElement('div'); mGroup.className = 'group';
+appendDigit(mGroup); appendDigit(mGroup);
+hmGroup.appendChild(hGroup); hmGroup.appendChild(makeSep()); hmGroup.appendChild(mGroup);
+wall.appendChild(hmGroup);
+
+const secWrapper = document.createElement('div'); secWrapper.id = 'sec-wrapper';
+const sGroup = document.createElement('div'); sGroup.className = 'group';
+appendDigit(sGroup); appendDigit(sGroup);
+secWrapper.appendChild(makeSep()); secWrapper.appendChild(sGroup);
+wall.appendChild(secWrapper);
+
+function applyScale(v) { document.documentElement.style.setProperty('--scale', v); }
+applyScale(S.scale);
+
+const sysDark = window.matchMedia('(prefers-color-scheme: dark)');
+const themeBtn = document.getElementById('btn-theme');
+
+function getTargetDate() {
+  const d = new Date();
+  if (S.tz && S.tz !== 'auto') {
+    try { return new Date(d.toLocaleString('en-US', { timeZone: S.tz })); } 
+    catch(e) {}
+  }
+  return d;
+}
+
+// Новая железная логика смены тем
+function applyTheme() {
+  let isDark = false;
+  if (S.theme === 'dark') {
+    isDark = true;
+  } else if (S.theme === 'light') {
+    isDark = false;
+  } else if (S.theme === 'auto_sys') {
+    isDark = sysDark.matches; // Напрямую читаем тему ядра браузера
+  } else {
+    const h = getTargetDate().getHours();
+    isDark = (h >= 19 || h < 7);
+  }
+
+  document.body.classList.toggle('light', !isDark);
+  themeBtn.textContent = isDark ? '☽' : '☼';
+}
+sysDark.addEventListener('change', () => { if (S.theme === 'auto_sys') applyTheme(); });
+
+function setHands(dIdx, digit) {
+  const pat = P[digit];
+  for (let c = 0; c < 6; c++) {
+    const [ta1, ta2] = pat[c];
+    const ho1 = allClocks[dIdx][c][0]; const ho2 = allClocks[dIdx][c][1];
+    ho1.angle += (ta1 - (ho1.angle % 360) + 360) % 360;
+    ho2.angle += (ta2 - (ho2.angle % 360) + 360) % 360;
+    ho1.el.style.transform = `rotate(${ho1.angle}deg)`;
+    ho2.el.style.transform = `rotate(${ho2.angle}deg)`;
+    const hidden = (ta1 === 225 && ta2 === 225);
+    ho1.el.style.opacity = hidden ? '0.06' : '1';
+    ho2.el.style.opacity = hidden ? '0.06' : '1';
+  }
+}
+
+let lastHourForTheme = -1;
+function tick() {
+  const targetDate = getTargetDate();
+  const h = targetDate.getHours();
+  const m = targetDate.getMinutes();
+  const s = targetDate.getSeconds();
+
+  if (h !== lastHourForTheme) {
+      lastHourForTheme = h;
+      applyTheme();
+  }
+
+  const hStr = String(h).padStart(2, '0');
+  const mStr = String(m).padStart(2, '0');
+  const sStr = String(s).padStart(2, '0');
+  const digits = (hStr + mStr + sStr).split('').map(Number);
+  
+  for (let d = 0; d < 4; d++) setHands(d, digits[d]);
+  if (S.seconds) { for (let d = 0; d < 2; d++) setHands(4 + d, digits[4 + d]); }
+}
+
+function applySeconds() { secWrapper.classList.toggle('hidden', !S.seconds); }
+
+let idleT;
+function resetIdle() {
+  document.body.classList.add('cursor-visible'); clearTimeout(idleT);
+  const panel = document.getElementById('panel');
+  idleT = setTimeout(() => { if (!panel.classList.contains('open')) document.body.classList.remove('cursor-visible'); }, 2800);
+}
+['mousemove','click','touchstart'].forEach(e => window.addEventListener(e, resetIdle)); resetIdle();
+
+const panel = document.getElementById('panel');
+document.getElementById('btn-settings').addEventListener('click', () => {
+  if (panel.classList.contains('open')) { panel.classList.remove('open'); setTimeout(() => { panel.style.display = ''; }, 50); }
+  else { panel.style.display = 'flex'; requestAnimationFrame(() => panel.classList.add('open')); document.body.classList.add('cursor-visible'); }
+});
+
+const themes = ['auto_sys','auto_time','dark','light'];
+document.getElementById('btn-theme').addEventListener('click', () => {
+  S.theme = themes[(themes.indexOf(S.theme) + 1) % themes.length];
+  localStorage.setItem('cc_v6_theme', S.theme); document.getElementById('theme-sel').value = S.theme; applyTheme();
+});
+
+document.getElementById('btn-sec').addEventListener('click', () => {
+  S.seconds = !S.seconds; localStorage.setItem('cc_v6_sec', S.seconds);
+  document.getElementById('toggle-sec').classList.toggle('on', S.seconds); applySeconds();
+});
+
+const themeSel = document.getElementById('theme-sel');
+themeSel.value = S.theme;
+themeSel.addEventListener('change', e => { S.theme = e.target.value; localStorage.setItem('cc_v6_theme', S.theme); applyTheme(); });
+
+// Геолокация
+document.getElementById('tz-display').textContent = S.tz === 'auto' ? 'Локальный' : S.tz;
+document.getElementById('geo-btn').addEventListener('click', () => {
+  if (!navigator.geolocation) return alert("Геолокация не поддерживается браузером");
+  const btn = document.getElementById('geo-btn'); btn.textContent = "⏳ Поиск...";
+  navigator.geolocation.getCurrentPosition(async (pos) => {
+    try {
+      const res = await fetch(`https://timeapi.io/api/TimeZone/coordinate?latitude=${pos.coords.latitude}&longitude=${pos.coords.longitude}`);
+      const data = await res.json();
+      S.tz = data.timeZone; localStorage.setItem('cc_v6_tz', S.tz);
+      document.getElementById('tz-display').textContent = S.tz;
+      btn.textContent = "✅ Готово"; setTimeout(() => btn.textContent = "🌍 Определить по гео", 3000);
+      lastHourForTheme = -1;
+      tick(); 
+    } catch (e) {
+      btn.textContent = "❌ Ошибка API"; setTimeout(() => btn.textContent = "🌍 Определить по гео", 3000);
+    }
+  }, () => {
+     btn.textContent = "❌ Отказано"; setTimeout(() => btn.textContent = "🌍 Определить по гео", 3000);
+  });
+});
+
+const scaleSl = document.getElementById('scale-sl'); const scaleVal = document.getElementById('scale-val');
+scaleSl.value = S.scale;
+scaleSl.addEventListener('input', e => {
+  S.scale = parseFloat(e.target.value); scaleVal.textContent = S.scale.toFixed(2);
+  applyScale(S.scale); localStorage.setItem('cc_v6_scale', S.scale);
+});
+
+const toggleSec = document.getElementById('toggle-sec');
+toggleSec.classList.toggle('on', S.seconds);
+toggleSec.addEventListener('click', () => {
+  S.seconds = !S.seconds; localStorage.setItem('cc_v6_sec', S.seconds);
+  toggleSec.classList.toggle('on', S.seconds); applySeconds();
+});
+
+const bgVideo = document.getElementById('bg-video'); const overlay = document.getElementById('bg-overlay'); let objURL = null;
+const savedBg = localStorage.getItem('cc_v6_bg');
+if (savedBg) { document.body.style.backgroundImage = `url(${savedBg})`; overlay.classList.add('active'); }
+
+document.getElementById('bg-file').addEventListener('change', e => {
+  const file = e.target.files[0]; if (!file) return;
+  if (objURL) URL.revokeObjectURL(objURL); objURL = URL.createObjectURL(file);
+  if (file.type.startsWith('video/')) {
+    document.body.style.backgroundImage = ''; localStorage.removeItem('cc_v6_bg');
+    bgVideo.src = objURL; bgVideo.style.display = 'block'; bgVideo.play(); overlay.classList.add('active');
+  } else {
+    const reader = new FileReader();
+    reader.onload = ev => {
+      const b64 = ev.target.result; localStorage.setItem('cc_v6_bg', b64);
+      document.body.style.backgroundImage = `url(${b64})`; document.body.style.backgroundSize = 'cover';
+      document.body.style.backgroundPosition = 'center'; bgVideo.style.display = 'none'; bgVideo.pause(); overlay.classList.add('active');
+    }; reader.readAsDataURL(file);
+  }
+});
+
+document.getElementById('clear-bg').addEventListener('click', () => {
+  document.getElementById('bg-file').value = ''; document.body.style.backgroundImage = '';
+  bgVideo.style.display = 'none'; bgVideo.pause(); bgVideo.removeAttribute('src'); overlay.classList.remove('active');
+  localStorage.removeItem('cc_v6_bg'); if (objURL) { URL.revokeObjectURL(objURL); objURL = null; }
+});
+
+applyTheme(); applySeconds(); tick(); setInterval(tick, 1000);
+</script>
+</body>
+</html>
