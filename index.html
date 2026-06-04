@@ -375,8 +375,14 @@ appendDigit(sGroup); appendDigit(sGroup);
 secWrapper.appendChild(makeSep()); secWrapper.appendChild(sGroup);
 wall.appendChild(secWrapper);
 
-function applyScale(v) { document.documentElement.style.setProperty('--scale', v); }
-applyScale(S.scale);
+function autoFixScale() {
+  let target = S.seconds ? 1050 : 650;
+  let currentScale = window.innerWidth < target ? (window.innerWidth - 20) / target : S.scale;
+  document.documentElement.style.setProperty('--scale', currentScale);
+}
+function applyScale(v) { S.scale = v; autoFixScale(); }
+window.addEventListener('resize', autoFixScale);
+autoFixScale();
 
 const sysDark = window.matchMedia('(prefers-color-scheme: dark)');
 const themeBtn = document.getElementById('btn-theme');
