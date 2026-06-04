@@ -407,7 +407,11 @@ function applyTheme() {
   document.body.classList.toggle('light', !isDark);
   themeBtn.textContent = isDark ? '☽' : '☼';
 }
-sysDark.addEventListener('change', () => { if (S.theme === 'auto_sys') applyTheme(); });
+if (sysDark.addEventListener) {
+  sysDark.addEventListener('change', () => { if (S.theme === 'auto_sys') applyTheme(); });
+} else if (sysDark.addListener) {
+  sysDark.addListener(() => { if (S.theme === 'auto_sys') applyTheme(); });
+}
 
 function setHands(dIdx, digit) {
   const pat = P[digit];
